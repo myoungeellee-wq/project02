@@ -17,6 +17,13 @@ from sklearn.metrics import (
     r2_score
 )
 
+font_path = "./font/NanumGothic.ttf"
+
+font_prop = fm.FontProperties(
+    fname=font_path
+)
+
+plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(
