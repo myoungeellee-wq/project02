@@ -230,63 +230,15 @@ if uploaded_file:
         X_train,
         y_train
     )    
-        
-""" 
-    # --------------------------------------------------
-    # 모델링
-    # --------------------------------------------------
 
-    target_col = st.selectbox(
-        "예측 대상",
-        df.columns
-    )
-
-    model_df = df.copy()
-
-    for col in model_df.columns:
-
-        if model_df[col].dtype == "object":
-
-            le = LabelEncoder()
-
-            model_df[col] = le.fit_transform(
-                model_df[col].astype(str)
-            )
-
-    X = model_df.drop(
-        columns=[target_col]
-    )
-
-    y = model_df[target_col]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
-    )
-
-    model = RandomForestRegressor(
-        n_estimators=300,
-        random_state=42,
-        n_jobs=-1
-    )
-
-    model.fit(
-        X_train,
-        y_train
-    )
-
-    y_pred = model.predict(
-        X_test
-    )
- """
     # --------------------------------------------------
     # 성능평가
     # --------------------------------------------------
 
     st.subheader("모델 성능")
-
+    y_pred = model.predict(
+        X_test
+    )
     mae = mean_absolute_error(
         y_test,
         y_pred
