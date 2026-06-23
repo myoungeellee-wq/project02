@@ -27,10 +27,10 @@ font_prop = fm.FontProperties(
 plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
-fonts = [f.name for f in fm.fontManager.ttflist]
-print("NanumGothic" in fonts)
-st.write("NanumGothic 존재:", "NanumGothic" in fonts)
-st.write("폰트 속성 :",font_prop.get_name())
+# fonts = [f.name for f in fm.fontManager.ttflist]
+# print("NanumGothic" in fonts)
+# st.write("NanumGothic 존재:", "NanumGothic" in fonts)
+# st.write("폰트 속성 :",font_prop.get_name())
 #print("font names:", if fonts = True)
 
 # --------------------------------------------
@@ -68,13 +68,13 @@ if uploaded_files:
 
     try:
         df = pd.read_csv(
-            uploaded_file,
+            uploaded_files,
             encoding="cp949"
         )
 
     except:
         df = pd.read_csv(
-            uploaded_file,
+            uploaded_files,
             encoding="utf-8"
         )
 
