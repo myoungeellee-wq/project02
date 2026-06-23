@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import seaborn as sns
 
 from sklearn.model_selection import train_test_split
@@ -17,17 +18,19 @@ from sklearn.metrics import (
     r2_score
 )
 
-#plt.rcParams["font.family"] = "DejaVu Sans"
-#plt.rcParams["font.family"] = "Malgun Gothic"  # 윈도우
-plt.rcParams["font.family"] = "NanumGothic"
-plt.rcParams["axes.unicode_minus"] = False     # 마이너스(-) 깨짐 방지
-#plt.rcParams["axes.unicode_minus"] = False
+font_path = "./fonts/NanumGothic.ttf"
 
-import matplotlib.font_manager as fm
+font_prop = fm.FontProperties(
+    fname=font_path
+)
+
+plt.rcParams["font.family"] = font_prop.get_name()
+plt.rcParams["axes.unicode_minus"] = False
 
 fonts = [f.name for f in fm.fontManager.ttflist]
 print("NanumGothic" in fonts)
 st.write("NanumGothic 존재:", "NanumGothic" in fonts)
+st.write("폰트 속성 :",font_prop.get_name())
 #print("font names:", if fonts = True)
 
 # --------------------------------------------
