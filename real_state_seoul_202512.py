@@ -18,7 +18,7 @@ from sklearn.metrics import (
     r2_score
 )
 
-font_path = "./fonts/NanumGothic.ttf"
+font_path = "./font/NanumGothic.ttf"
 
 font_prop = fm.FontProperties(
     fname=font_path
