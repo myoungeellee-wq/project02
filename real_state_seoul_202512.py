@@ -17,8 +17,11 @@ from sklearn.metrics import (
     r2_score
 )
 
-plt.rcParams["font.family"] = "DejaVu Sans"
-plt.rcParams["axes.unicode_minus"] = False
+#plt.rcParams["font.family"] = "DejaVu Sans"
+#plt.rcParams["font.family"] = "Malgun Gothic"  # 윈도우
+plt.rcParams["font.family"] = "NanumGothic"
+plt.rcParams["axes.unicode_minus"] = False     # 마이너스(-) 깨짐 방지
+#plt.rcParams["axes.unicode_minus"] = False
 
 # --------------------------------------------------
 # 페이지 설정
