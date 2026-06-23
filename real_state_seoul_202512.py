@@ -23,7 +23,13 @@ plt.rcParams["font.family"] = "NanumGothic"
 plt.rcParams["axes.unicode_minus"] = False     # 마이너스(-) 깨짐 방지
 #plt.rcParams["axes.unicode_minus"] = False
 
-# --------------------------------------------------
+import matplotlib.font_manager as fm
+
+fonts = [f.name for f in fm.fontManager.ttflist]
+print("NanumGothic" in fonts)
+#print("font names:", if fonts = True)
+
+# --------------------------------------------
 # 페이지 설정
 # --------------------------------------------------
 
@@ -168,7 +174,64 @@ if uploaded_file:
     )
 
     st.pyplot(fig)
+        
+    # --------------------------------------------------
+    # 모델링
+    # --------------------------------------------------
 
+    target_col = st.selectbox(
+        "예측 대상",
+        df.columns
+    )
+
+    model_df = df.copy()
+
+    # datetime -> 숫자 변환
+    for col in model_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(model_df[col]):
+            model_df[col] = (
+                model_df[col].astype("int64")
+                // 10**9
+            )
+
+    # 문자열 -> Label Encoding
+    for col in model_df.columns:
+        if model_df[col].dtype == "object":
+            le = LabelEncoder()
+            model_df[col] = le.fit_transform(
+                model_df[col].astype(str)
+            )
+
+    # 숫자 컬럼만 사용
+    model_df = model_df.select_dtypes(
+        include=[np.number]
+    )
+
+    X = model_df.drop(
+        columns=[target_col]
+    )
+
+    y = model_df[target_col]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42
+    )
+
+    model = RandomForestRegressor(
+        n_estimators=300,
+        random_state=42,
+        n_jobs=-1
+    )
+
+    model.fit(
+        X_train,
+        y_train
+    )    
+        
+""" 
     # --------------------------------------------------
     # 모델링
     # --------------------------------------------------
@@ -217,7 +280,7 @@ if uploaded_file:
     y_pred = model.predict(
         X_test
     )
-
+ """
     # --------------------------------------------------
     # 성능평가
     # --------------------------------------------------
