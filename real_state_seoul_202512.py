@@ -48,33 +48,22 @@ st.title("🏢 AI 기반 부동산 실거래가 예측")
 # 파일 업로드
 # --------------------------------------------------
 
-""" uploaded_file = st.file_uploader(
+uploaded_file = st.file_uploader(
     "CSV 파일 업로드",
     type=["csv"]
 )
- """
-uploaded_files = st.file_uploader(
-    "CSV 파일 업로드",
-    type=["csv"],
-    accept_multiple_files=True
-)
 
-for file in uploaded_files:
-    df = pd.read_csv(file)
-    st.write(file.name)
-    st.dataframe(df.head())
-
-if uploaded_files:
+if uploaded_file:
 
     try:
         df = pd.read_csv(
-            uploaded_files,
+            uploaded_file,
             encoding="cp949"
         )
 
     except:
         df = pd.read_csv(
-            uploaded_files,
+            uploaded_file,
             encoding="utf-8"
         )
 
