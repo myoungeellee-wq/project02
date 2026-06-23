@@ -64,7 +64,7 @@ for file in uploaded_files:
     st.write(file.name)
     st.dataframe(df.head())
 
-if uploaded_file:
+if uploaded_files:
 
     try:
         df = pd.read_csv(
