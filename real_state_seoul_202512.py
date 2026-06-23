@@ -17,6 +17,9 @@ from sklearn.metrics import (
     r2_score
 )
 
+plt.rcParams["font.family"] = "DejaVu Sans"
+plt.rcParams["axes.unicode_minus"] = False
+
 # --------------------------------------------------
 # 페이지 설정
 # --------------------------------------------------
