@@ -206,9 +206,9 @@ if uploaded_file:
         mask = mask,
         annot=True,
         cmap="Reds",
-        fmt=".2f",
-        vmin=-1,
-        vmax=1
+        fmt=".2f"
+#        vmin=-1,
+#        vmax=1
 #        center=0,
 #        ax = ax
     )
