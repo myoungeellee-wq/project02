@@ -208,9 +208,9 @@ if uploaded_file:
         cmap="Reds",
         fmt=".2f",
         vmin=-1,
-        vmax=1,
-        center=0,
-        ax = ax
+        vmax=1
+#        center=0,
+#        ax = ax
     )
     st.pyplot(fig)
 
