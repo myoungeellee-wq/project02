@@ -210,8 +210,7 @@ if uploaded_file:
         "건물용도",
         "신고구분",
         "건물명",
-        "연도",
-        "월"
+        "계약월"
     ]
     for col in cat_cols:
         le = LabelEncoder()
