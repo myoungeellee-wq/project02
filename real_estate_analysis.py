@@ -198,7 +198,8 @@ if uploaded_file:
     # 물건금액 기준 상관관계
     # ---------------------------------------------------
     st.subheader("물건금액 기준 상관관계")
-    corr_target = df.select_dtypes(include=np.number).corr()
+#    corr_target = df.select_dtypes(include=np.number).corr()
+    corr_target = df.corr()
     mask = np.triu(np.ones_like(corr_target, dtype=bool))
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(
