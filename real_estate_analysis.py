@@ -212,7 +212,8 @@ if uploaded_file:
         corr_target[col] = le.fit_transform(
             corr_target[col].astype(str)
         )
-    mask = np.triu(np.ones_like(corr_target, dtype=bool))
+    #mask = np.triu(np.ones_like(corr_target, dtype=bool))
+    corr_target = df.corr(numeric_only=True)
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(
         corr_target,
