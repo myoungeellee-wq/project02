@@ -199,7 +199,7 @@ if uploaded_file:
     # ---------------------------------------------------
     st.subheader("물건금액 기준 상관관계")
 #    corr_target = df.select_dtypes(include=np.number).corr()
-    corr_target = df.corr(numeric_only=True)
+    corr_target = df.copy()
     cat_cols = [
         "자치구명",
         "법정동명",
