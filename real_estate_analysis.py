@@ -199,7 +199,7 @@ if uploaded_file:
     # ---------------------------------------------------
     st.subheader("물건금액 기준 상관관계")
 #    corr_target = df.select_dtypes(include=np.number).corr()
-    corr_target = df.copy()
+    heatmap_df = df.copy()
     cat_cols = [
         "자치구명",
         "법정동명",
@@ -209,11 +209,9 @@ if uploaded_file:
     ]
     for col in cat_cols:
         le = LabelEncoder()
-        corr_target[col] = le.fit_transform(
-            corr_target[col].astype(str)
-        )
+        heatmap_df[col] = le.fit_transform(heatmap_df[col].astype(str))
     #mask = np.triu(np.ones_like(corr_target, dtype=bool))
-    corr_target = df.corr(numeric_only=True)
+    corr_target = heatmap_df.corr(numeric_only=True)
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(
         corr_target,
