@@ -199,7 +199,19 @@ if uploaded_file:
     # ---------------------------------------------------
     st.subheader("물건금액 기준 상관관계")
 #    corr_target = df.select_dtypes(include=np.number).corr()
-    corr_target = df.corr()
+    corr_target = df.corr(numeric_only=True)
+    cat_cols = [
+        "자치구명",
+        "법정동명",
+        "건물용도",
+        "신고구분",
+        "건물명"
+    ]
+    for col in cat_cols:
+        le = LabelEncoder()
+        corr_target[col] = le.fit_transform(
+            corr_target[col].astype(str)
+        )
     mask = np.triu(np.ones_like(corr_target, dtype=bool))
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(
