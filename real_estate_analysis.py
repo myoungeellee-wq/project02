@@ -210,13 +210,13 @@ if uploaded_file:
 
     sns.heatmap(
         corr_target.sort_values(
-            by="물건금액(만원)",
-            ascending=True
+            by="물건금액(만원)"
         ),
         annot=True,
         fmt=".2f",
         cmap="Reds",
-        ax=ax
+        ax=ax,
+        ascending=True
     )
 
     st.pyplot(fig)
