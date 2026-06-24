@@ -197,34 +197,24 @@ if uploaded_file:
     # ---------------------------------------------------
     # 물건금액 기준 상관관계
     # ---------------------------------------------------
-
     st.subheader("물건금액 기준 상관관계")
-
-    corr_target = df.select_dtypes(
-        include=np.number
-    ).corr()
-
-    fig, ax = plt.subplots(
-        figsize=(8,6)
-    )
-
+    corr_target = df.select_dtypes(include=np.number).corr()
+    mask = np.triu(np.ones_like(corr_target, dtype=bool))
+    plt.figure(figsize=(10,8))
     sns.heatmap(
-        corr_target.sort_values(
-            by="물건금액(만원)"
-        ),
+        corr_target,
         annot=True,
-        fmt=".2f",
         cmap="Reds",
-        ax=ax,
-        ascending=True
+        fmt=".2f",
+        vmin=-1,
+        vmax=1,
+        center=0
     )
-
     st.pyplot(fig)
 
     # ---------------------------------------------------
     # 인코딩
     # ---------------------------------------------------
-
     cat_cols = [
         "자치구명",
         "법정동명",
