@@ -203,14 +203,14 @@ if uploaded_file:
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(
         corr_target,
-        mask = mask,
+    #    mask = mask,
         annot=True,
         cmap="Reds",
         fmt=".2f",
-#        vmin=-1,
-#        vmax=1
-#        center=0,
-        ax = ax
+        vmin=-1,
+        vmax=1,
+        center=0
+#        ax = ax
     )
     st.pyplot(fig)
 
