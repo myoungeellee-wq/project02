@@ -420,13 +420,13 @@ def main():
                                    value=int(df_raw["건축년도"].median()), step=1)
         report_opts = sorted(df_raw["신고구분"].unique().tolist())
         report = c3.selectbox("신고구분", report_opts)
-        year = c3.number_input("거래연도", min_value=2000, max_value=2035,
+        year = c3.number_input("접수연도", min_value=2000, max_value=2035,
                                value=int(df_raw["연도"].median()), step=1)
         #default_year = 거래연도_변수
         default_year = 2026
         if not default_year or default_year < 2000:
             default_year = 2000  # or datetime.now().year
-        year = c3.number_input("거래연도", min_value=2000, max_value=2035, value=default_year)
+        year = c3.number_input("접수연도", min_value=2000, max_value=2035, value=default_year)
         
         
         month = c3.number_input("거래월", min_value=1, max_value=12, value=6, step=1)
