@@ -3,12 +3,11 @@
 서울시 부동산 실거래가 분석·예측 대시보드 (Streamlit)
 ----------------------------------------------------
 친구가 만든 노트북(project03_1.ipynb)의 전처리/모델 파이프라인을 그대로 옮겨
-실시간 시세 예측 + 모델 비교 + EDA + 변수 영향도를 보여주는 웹 앱.
-실행:
-    pip install streamlit pandas numpy scikit-learn tensorflow matplotlib
+실시간 시세 예측 + 모델 비교 + EDA + 변수 영향도를 보여주는 웹 앱 
+실행: pip install streamlit pandas numpy scikit-learn tensorflow matplotlib
     streamlit run app.py
 
-데이터:
+데이터:   
     기본 경로 = ./dataset/서울시 부동산 실거래가 정보_202606.csv  (cp949)
     경로가 없으면 사이드바에서 CSV 업로드 가능.
 
