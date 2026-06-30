@@ -426,10 +426,10 @@ def main():
         default_year = 2026
         if not default_year or default_year < 2000:
             default_year = 2000  # or datetime.now().year
-        year = c3.number_input("거래 연도", min_value=2000, max_value=2035, value=default_year)
+        year = c3.number_input("거래연도", min_value=2000, max_value=2035, value=default_year)
         
         
-        month = c3.number_input("거래 월", min_value=1, max_value=12, value=6, step=1)
+        month = c3.number_input("거래월", min_value=1, max_value=12, value=6, step=1)
 
         model_choices = list(sk_models.keys())
         if dl_art is not None:
