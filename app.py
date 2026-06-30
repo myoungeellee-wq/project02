@@ -371,10 +371,12 @@ def main():
     sb.caption(f"입력 변수 {len(feature_cols)}개 · 타깃: 면적당금액(만원/㎡)")
 
     # 머신러닝 학습
+    #with st.spinner("머신러닝 모델 학습 중..."):
+    #   sk_models, sk_res = _cached_sklearn(data_key, test_size)
+    #   X_tr, X_te, y_tr, y_te = st.session_state["_splits"]
     with st.spinner("머신러닝 모델 학습 중..."):
-        sk_models, sk_res = _cached_sklearn(data_key, test_size)
-    X_tr, X_te, y_tr, y_te = st.session_state["_splits"]
-
+        sk_models, sk_res, (X_tr, X_te, y_tr, y_te) = _cached_sklearn(data_key, test_size)
+    
     # 딥러닝 학습(옵션)
     dl_art, dl_res = None, None
     if use_dl:
