@@ -299,12 +299,19 @@ def _cached_bundle(raw_bytes: bytes):
     return preprocess(df)
 
 
+# @st.cache_resource(show_spinner=False)
+# def _cached_sklearn(data_key: str, test_size: float):
+#     bundle = st.session_state["_bundle"]
+#     X_tr, X_te, y_tr, y_te = split_xy(bundle, test_size=test_size)
+#     st.session_state["_splits"] = (X_tr, X_te, y_tr, y_te)
+#    return train_sklearn(X_tr, y_tr, X_te, y_te)
 @st.cache_resource(show_spinner=False)
 def _cached_sklearn(data_key: str, test_size: float):
     bundle = st.session_state["_bundle"]
     X_tr, X_te, y_tr, y_te = split_xy(bundle, test_size=test_size)
     st.session_state["_splits"] = (X_tr, X_te, y_tr, y_te)
-    return train_sklearn(X_tr, y_tr, X_te, y_te)
+    sk_models, sk_res = train_sklearn(X_tr, y_tr, X_te, y_te)
+    return sk_models, sk_res, (X_tr, X_te, y_tr, y_te)
 
 
 @st.cache_resource(show_spinner=False)
