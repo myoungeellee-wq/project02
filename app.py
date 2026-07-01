@@ -1,435 +1,581 @@
-# -*- coding: utf-8 -*-
-"""
-서울시 부동산 실거래가 분석 대시보드
-- EDA, 시계열 분석, 머신러닝 가격 예측을 제공하는 Streamlit 앱
-"""
+import warnings
+warnings.filterwarnings("ignore")
 
-import os
-import numpy as np
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import (
-    RandomForestRegressor,
-    GradientBoostingRegressor,
-    ExtraTreesRegressor,
-    AdaBoostRegressor,
+    RandomForestRegressor, GradientBoostingRegressor,
+    ExtraTreesRegressor, AdaBoostRegressor
 )
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# -----------------------------------------------------------------------
-# 기본 설정
-# -----------------------------------------------------------------------
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import (
+    Dense, Dropout, Input, concatenate,
+    Conv1D, MaxPooling1D, Flatten, LSTM, GRU
+)
+from tensorflow.keras.callbacks import EarlyStopping
+
+# ────────────────────────────────────────────────────────
+# 페이지 설정
+# ────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="서울시 부동산 실거래가 분석",
-    page_icon="🏢",
-    layout="wide",
+    page_icon="🏠",
+    layout="wide"
 )
 
-DEFAULT_CSV_NAME = "서울시_부동산_실거래가_정보_202606.csv"
-USE_COLS = [
-    "계약일", "자치구명", "법정동명", "건물면적(㎡)", "토지면적(㎡)",
-    "층", "건축년도", "건물용도", "건물명", "신고구분", "물건금액(만원)",
-]
+st.title("🏠 서울시 부동산 실거래가 예측 분석")
+st.markdown("머신러닝 · 딥러닝 · 시계열 모델을 비교 분석합니다.")
 
+# ────────────────────────────────────────────────────────
+# 데이터 로드 & 전처리
+# ────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def load_and_preprocess(uploaded_file):
+    df = pd.read_csv(uploaded_file, encoding="cp949")
 
-# -----------------------------------------------------------------------
-# 데이터 로딩 & 전처리
-# -----------------------------------------------------------------------
-@st.cache_data(show_spinner="데이터를 불러오는 중입니다...")
-def load_data(file) -> pd.DataFrame:
-    """CSV를 읽고 노트북과 동일한 전처리(결측치/중복/이상치 제거)를 적용."""
-    try:
-        df = pd.read_csv(file, encoding="cp949")
-    except UnicodeDecodeError:
-        file.seek(0) if hasattr(file, "seek") else None
-        df = pd.read_csv(file, encoding="utf-8")
-
-    # 필요한 컬럼만 사용 (없는 컬럼은 무시)
-    cols = [c for c in USE_COLS if c in df.columns]
+    cols = ["계약일", "자치구명", "법정동명", "건물면적(㎡)", "토지면적(㎡)",
+            "층", "건축년도", "건물용도", "건물명", "신고구분", "물건금액(만원)"]
     df = df[cols].copy()
 
-    # 결측치 제거
-    df = df.dropna()
-
-    # 중복 제거
-    df = df.drop_duplicates()
-
-    # 건물면적이 0 이하인 행 제거
+    # 결측치·중복 제거
+    df = df.dropna().drop_duplicates()
     df = df[df["건물면적(㎡)"] > 0]
 
-    # 건축년도가 비정상(0 등)인 행 제거
-    df = df[df["건축년도"] > 1900]
+    # 이상치(IQR)
+    Q1 = df["물건금액(만원)"].quantile(0.25)
+    Q3 = df["물건금액(만원)"].quantile(0.75)
+    IQR = Q3 - Q1
+    df = df[(df["물건금액(만원)"] >= Q1 - 1.5*IQR) &
+            (df["물건금액(만원)"] <= Q3 + 1.5*IQR)]
 
-    # 이상치(IQR) 제거 - 물건금액 기준
-    q1 = df["물건금액(만원)"].quantile(0.25)
-    q3 = df["물건금액(만원)"].quantile(0.75)
-    iqr = q3 - q1
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
-    df = df[(df["물건금액(만원)"] >= lower) & (df["물건금액(만원)"] <= upper)]
-
-    # 파생 변수
+    # 파생변수
     df["면적당금액"] = df["물건금액(만원)"] / df["건물면적(㎡)"]
-    df["계약일"] = pd.to_datetime(df["계약일"].astype(int).astype(str), format="%Y%m%d")
+    df["계약일"] = pd.to_datetime(df["계약일"].astype(str), format="%Y%m%d", errors="coerce")
+    df = df.dropna(subset=["계약일"])
     df["연도"] = df["계약일"].dt.year
     df["월"] = df["계약일"].dt.month
+    df["계약년월"] = df["계약일"].dt.to_period("M").astype(str)
 
-    df = df.reset_index(drop=True)
-    return df
-
-
-@st.cache_resource(show_spinner="모델을 학습하는 중입니다... (최초 1회만 수행)")
-def train_models(df: pd.DataFrame):
-    """범주형 컬럼을 인코딩하고 여러 회귀 모델을 학습 후 성능을 비교."""
-    cat_cols = ["자치구명", "법정동명", "건물용도", "건물명", "신고구분"]
+    # 인코딩
+    cats = ["자치구명", "법정동명", "건물용도", "건물명", "신고구분"]
     encoders = {}
-    enc_df = df.copy()
-    for c in cat_cols:
+    for c in cats:
         le = LabelEncoder()
-        enc_df[c] = le.fit_transform(enc_df[c].astype(str))
+        df[c] = le.fit_transform(df[c].astype(str))
         encoders[c] = le
 
-    feature_cols = [
-        "자치구명", "법정동명", "건물면적(㎡)", "토지면적(㎡)",
-        "층", "건축년도", "건물용도", "건물명", "신고구분",
-    ]
-    X = enc_df[feature_cols]
-    y = enc_df["면적당금액"]
+    return df, encoders
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+
+@st.cache_data(show_spinner=False)
+def split_data(df, test_size):
+    X = df.drop(columns=["계약일", "물건금액(만원)", "계약년월", "면적당금액"])
+    y = df["면적당금액"]
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=test_size, random_state=42
     )
+    return X_tr, X_te, y_tr, y_te, X.columns.tolist()
 
-    models = {
-        "Linear Regression": LinearRegression(),
-        "Decision Tree": DecisionTreeRegressor(random_state=42),
-        "Random Forest": RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1),
-        "Gradient Boosting": GradientBoostingRegressor(random_state=42),
-        "Extra Trees": ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1),
-        "AdaBoost": AdaBoostRegressor(random_state=42),
-    }
 
-    results = []
-    fitted_models = {}
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        pred = model.predict(X_test)
-        mae = mean_absolute_error(y_test, pred)
-        rmse = np.sqrt(mean_squared_error(y_test, pred))
-        r2 = r2_score(y_test, pred)
-        results.append([name, mae, rmse, r2])
-        fitted_models[name] = model
-
-    result_df = pd.DataFrame(results, columns=["Model", "MAE", "RMSE", "R2"])
-    result_df = result_df.sort_values(by="R2", ascending=False).reset_index(drop=True)
-    best_name = result_df.iloc[0]["Model"]
-
+def evaluate_model(y_true, y_pred, name):
     return {
-        "encoders": encoders,
-        "feature_cols": feature_cols,
-        "models": fitted_models,
-        "result_df": result_df,
-        "best_name": best_name,
-        "X_test": X_test,
-        "y_test": y_test,
+        "Model": name,
+        "MAE":  round(mean_absolute_error(y_true, y_pred), 4),
+        "RMSE": round(np.sqrt(mean_squared_error(y_true, y_pred)), 4),
+        "R²":   round(r2_score(y_true, y_pred), 4),
     }
 
 
-# -----------------------------------------------------------------------
-# 사이드바: 데이터 소스 & 필터
-# -----------------------------------------------------------------------
-st.sidebar.title("🏢 메뉴")
-
-uploaded = st.sidebar.file_uploader("CSV 파일 업로드 (선택)", type=["csv"])
-
-data_source = None
-if uploaded is not None:
-    data_source = uploaded
-elif os.path.exists(DEFAULT_CSV_NAME):
-    data_source = DEFAULT_CSV_NAME
-elif os.path.exists(os.path.join("dataset", DEFAULT_CSV_NAME)):
-    data_source = os.path.join("dataset", DEFAULT_CSV_NAME)
-
-if data_source is None:
-    st.warning(
-        f"`{DEFAULT_CSV_NAME}` 파일을 앱과 같은 폴더에 두거나, "
-        "왼쪽 사이드바에서 CSV 파일을 업로드해주세요."
+# ────────────────────────────────────────────────────────
+# 사이드바
+# ────────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("⚙️ 설정")
+    uploaded = st.file_uploader(
+        "CSV 파일 업로드",
+        type=["csv"],
+        help="서울시 부동산 실거래가 CSV (cp949 인코딩)"
     )
+    st.divider()
+    test_size  = st.slider("테스트 비율", 0.1, 0.4, 0.2, 0.05)
+    epochs_dl  = st.slider("딥러닝 에포크", 10, 100, 30, 10)
+    batch_size = st.selectbox("배치 사이즈", [32, 64, 128], index=0)
+    st.divider()
+    use_ml  = st.checkbox("머신러닝 학습", value=True)
+    use_dl  = st.checkbox("딥러닝 학습", value=True)
+    use_ts  = st.checkbox("시계열 분석 (Prophet)", value=False)
+    st.divider()
+    run_btn = st.button("🚀 분석 시작", use_container_width=True, type="primary")
+
+# ────────────────────────────────────────────────────────
+# 메인
+# ────────────────────────────────────────────────────────
+if not uploaded:
+    st.info("👈 사이드바에서 CSV 파일을 업로드하고 **분석 시작** 버튼을 눌러주세요.")
     st.stop()
 
-df_all = load_data(data_source)
+# 데이터 로드
+with st.spinner("데이터 로드 중..."):
+    df, encoders = load_and_preprocess(uploaded)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔎 필터")
+# 탭 구성
+tab_eda, tab_ml, tab_dl, tab_cmp, tab_ts = st.tabs([
+    "📊 데이터 탐색", "🤖 머신러닝", "🧠 딥러닝", "📈 모델 비교", "📅 시계열"
+])
 
-gu_options = sorted(df_all["자치구명"].unique().tolist())
-sel_gu = st.sidebar.multiselect("자치구", gu_options, default=gu_options)
-
-dong_pool = df_all[df_all["자치구명"].isin(sel_gu)]["법정동명"].unique().tolist()
-dong_options = sorted(dong_pool)
-sel_dong = st.sidebar.multiselect("법정동", dong_options, default=dong_options)
-
-usage_options = sorted(df_all["건물용도"].unique().tolist())
-sel_usage = st.sidebar.multiselect("건물용도", usage_options, default=usage_options)
-
-report_options = sorted(df_all["신고구분"].unique().tolist())
-sel_report = st.sidebar.multiselect("신고구분", report_options, default=report_options)
-
-year_min, year_max = int(df_all["연도"].min()), int(df_all["연도"].max())
-if year_min == year_max:
-    st.sidebar.caption(f"거래 연도: {year_min}년 (단일 연도 데이터)")
-    sel_year = (year_min, year_max)
-else:
-    sel_year = st.sidebar.slider("거래 연도", year_min, year_max, (year_min, year_max))
-
-price_min, price_max = float(df_all["물건금액(만원)"].min()), float(df_all["물건금액(만원)"].max())
-sel_price = st.sidebar.slider(
-    "물건금액 (만원)", price_min, price_max, (price_min, price_max)
-)
-
-# 필터 적용
-df = df_all[
-    df_all["자치구명"].isin(sel_gu)
-    & df_all["법정동명"].isin(sel_dong)
-    & df_all["건물용도"].isin(sel_usage)
-    & df_all["신고구분"].isin(sel_report)
-    & df_all["연도"].between(sel_year[0], sel_year[1])
-    & df_all["물건금액(만원)"].between(sel_price[0], sel_price[1])
-].copy()
-
-st.sidebar.markdown("---")
-st.sidebar.metric("필터링된 거래 건수", f"{len(df):,} 건")
-
-
-# -----------------------------------------------------------------------
-# 메인 타이틀
-# -----------------------------------------------------------------------
-st.title("🏢 서울시 부동산 실거래가 분석 대시보드")
-st.caption("출처: 서울시 부동산 실거래가 정보 (전처리: 결측치/중복/이상치 제거)")
-
-if df.empty:
-    st.error("선택한 필터 조건에 해당하는 데이터가 없습니다. 필터를 조정해주세요.")
-    st.stop()
-
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📋 데이터 개요", "📊 탐색적 분석", "📈 시계열 분석", "🤖 모델 비교 & 예측"]
-)
-
-# -----------------------------------------------------------------------
-# Tab 1. 데이터 개요
-# -----------------------------------------------------------------------
-with tab1:
+# ────────────────────────────────────────────────────────
+# TAB 1: EDA
+# ────────────────────────────────────────────────────────
+with tab_eda:
+    st.subheader("📊 데이터 탐색 (EDA)")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("총 거래 건수", f"{len(df):,} 건")
-    c2.metric("평균 거래금액", f"{df['물건금액(만원)'].mean():,.0f} 만원")
-    c3.metric("평균 면적당금액", f"{df['면적당금액'].mean():,.1f} 만원/㎡")
-    c4.metric("평균 건물면적", f"{df['건물면적(㎡)'].mean():,.1f} ㎡")
+    c1.metric("총 데이터 수", f"{len(df):,}")
+    c2.metric("자치구 수", df["자치구명"].nunique())
+    c3.metric("평균 면적당금액 (만원/㎡)", f"{df['면적당금액'].mean():,.1f}")
+    c4.metric("연도 범위",
+              f"{int(df['연도'].min())} ~ {int(df['연도'].max())}")
 
-    st.markdown("### 데이터 미리보기")
-    st.dataframe(df.head(50), use_container_width=True)
-
-    st.markdown("### 기초 통계량")
-    st.dataframe(df.describe(), use_container_width=True)
-
-    st.caption("※ 전처리(결측치/중복/이상치 제거) 후 데이터로, 현재 결측치는 없습니다.")
-
-    csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "⬇️ 필터링된 데이터 CSV 다운로드",
-        data=csv_bytes,
-        file_name="filtered_real_estate.csv",
-        mime="text/csv",
-    )
-
-# -----------------------------------------------------------------------
-# Tab 2. 탐색적 분석 (EDA)
-# -----------------------------------------------------------------------
-with tab2:
+    st.markdown("---")
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("#### 면적당금액 분포")
-        fig = px.histogram(
-            df, x="면적당금액", nbins=50, marginal="box",
-            color_discrete_sequence=["#e74c3c"],
-        )
-        fig.update_layout(xaxis_title="면적당금액(만원/㎡)", yaxis_title="건수")
+        st.markdown("**면적당금액 분포**")
+        fig = px.histogram(df, x="면적당금액", nbins=60, color_discrete_sequence=["#EF4444"])
+        fig.update_layout(height=320, margin=dict(t=20, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        st.markdown("#### 건물용도별 거래금액 분포")
-        fig = px.box(
-            df, x="건물용도", y="물건금액(만원)", color="건물용도",
-        )
-        fig.update_layout(showlegend=False)
+        st.markdown("**자치구별 평균 면적당금액**")
+        gu_price = (df.groupby("자치구명")["면적당금액"]
+                    .mean().sort_values(ascending=False).reset_index())
+        fig = px.bar(gu_price, x="자치구명", y="면적당금액",
+                     color="면적당금액", color_continuous_scale="Reds")
+        fig.update_layout(height=320, margin=dict(t=20, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
     col3, col4 = st.columns(2)
 
     with col3:
-        st.markdown("#### 건물면적 vs 거래금액")
-        fig = px.scatter(
-            df, x="건물면적(㎡)", y="물건금액(만원)", color="건물용도",
-            opacity=0.6, hover_data=["법정동명", "건축년도"],
-        )
+        st.markdown("**월별 평균 면적당금액 추이**")
+        monthly = (df.groupby("계약년월")["면적당금액"]
+                   .mean().reset_index().sort_values("계약년월"))
+        fig = px.line(monthly, x="계약년월", y="면적당금액",
+                      color_discrete_sequence=["#EF4444"], markers=True)
+        fig.update_layout(height=320, margin=dict(t=20, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
     with col4:
-        st.markdown("#### 자치구별 평균 거래금액")
-        gu_avg = (
-            df.groupby("자치구명")["물건금액(만원)"]
-            .mean()
-            .sort_values(ascending=False)
-            .reset_index()
-        )
-        fig = px.bar(
-            gu_avg, x="자치구명", y="물건금액(만원)",
-            color_discrete_sequence=["#e74c3c"],
-        )
+        st.markdown("**건물용도별 거래 비율**")
+        use_cnt = df["건물용도"].value_counts().reset_index()
+        use_cnt.columns = ["건물용도", "건수"]
+        fig = px.pie(use_cnt, names="건물용도", values="건수",
+                     color_discrete_sequence=px.colors.sequential.Reds_r)
+        fig.update_layout(height=320, margin=dict(t=20, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### 수치형 변수 상관관계")
-    numeric_cols = ["건물면적(㎡)", "토지면적(㎡)", "층", "건축년도", "물건금액(만원)", "면적당금액"]
-    numeric_cols = [c for c in numeric_cols if c in df.columns]
-    corr = df[numeric_cols].corr()
-    fig = px.imshow(
-        corr, text_auto=".2f", color_continuous_scale="Reds", aspect="auto",
+    st.markdown("**상관관계 히트맵**")
+    numeric_df = df.select_dtypes(include="number")
+    corr = numeric_df.corr()
+    fig = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r",
+                    aspect="auto")
+    fig.update_layout(height=500, margin=dict(t=20, b=20))
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("원본 데이터 미리보기"):
+        st.dataframe(df.head(200), use_container_width=True)
+
+# ────────────────────────────────────────────────────────
+# 분석 실행
+# ────────────────────────────────────────────────────────
+if not run_btn:
+    with tab_ml:
+        st.info("사이드바에서 **분석 시작**을 눌러주세요.")
+    with tab_dl:
+        st.info("사이드바에서 **분석 시작**을 눌러주세요.")
+    with tab_cmp:
+        st.info("사이드바에서 **분석 시작**을 눌러주세요.")
+    with tab_ts:
+        st.info("사이드바에서 **분석 시작**을 눌러주세요.")
+    st.stop()
+
+# 데이터 분리
+X_tr, X_te, y_tr, y_te, feat_cols = split_data(df, test_size)
+
+# 스케일링
+scaler = MinMaxScaler()
+X_tr_scaled = scaler.fit_transform(X_tr)
+X_te_scaled = scaler.transform(X_te)
+
+all_results = []   # 전체 모델 결과 수집
+
+# ────────────────────────────────────────────────────────
+# TAB 2: 머신러닝
+# ────────────────────────────────────────────────────────
+with tab_ml:
+    st.subheader("🤖 머신러닝 모델 학습 & 비교")
+
+    if not use_ml:
+        st.warning("사이드바에서 '머신러닝 학습'을 체크해주세요.")
+        st.stop()
+
+    sk_models = {
+        "Linear Regression":    LinearRegression(),
+        "Decision Tree":        DecisionTreeRegressor(random_state=42),
+        "Random Forest":        RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1),
+        "Gradient Boosting":    GradientBoostingRegressor(random_state=42),
+        "Extra Trees":          ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1),
+        "AdaBoost":             AdaBoostRegressor(random_state=42),
+    }
+
+    sk_results = []
+    prog = st.progress(0, "머신러닝 모델 학습 중...")
+    for i, (name, model) in enumerate(sk_models.items()):
+        model.fit(X_tr, y_tr)
+        pred = model.predict(X_te)
+        r = evaluate_model(y_te, pred, name)
+        sk_results.append(r)
+        all_results.append(r)
+        prog.progress((i+1)/len(sk_models), f"{name} 완료")
+    prog.empty()
+
+    sk_df = pd.DataFrame(sk_results).sort_values("R²", ascending=False).reset_index(drop=True)
+    st.session_state["sk_df"] = sk_df
+    st.session_state["sk_models"] = sk_models
+
+    best_sk = sk_df.iloc[0]
+    st.success(f"🏆 최고 모델: **{best_sk['Model']}** (R² = {best_sk['R²']:.4f})")
+
+    st.dataframe(
+        sk_df.style.background_gradient(subset=["R²"], cmap="Reds")
+                   .format({"MAE": "{:.4f}", "RMSE": "{:.4f}", "R²": "{:.4f}"}),
+        use_container_width=True
     )
-    st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### 건물용도별 거래 건수")
-    usage_count = df["건물용도"].value_counts().reset_index()
-    usage_count.columns = ["건물용도", "건수"]
-    fig = px.pie(usage_count, names="건물용도", values="건수", hole=0.4)
-    st.plotly_chart(fig, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.bar(sk_df, x="Model", y="R²", color="R²",
+                     color_continuous_scale="Reds", title="R² 비교")
+        fig.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------------------------------------------------
-# Tab 3. 시계열 분석
-# -----------------------------------------------------------------------
-with tab3:
-    st.markdown("#### 일별 평균 거래금액 추이 (30일 이동평균)")
-    daily = df.groupby("계약일")["면적당금액"].mean().sort_index()
+    with col2:
+        fig = px.bar(sk_df, x="Model", y=["MAE", "RMSE"],
+                     barmode="group", title="MAE / RMSE 비교",
+                     color_discrete_sequence=["#EF4444", "#F97316"])
+        fig.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
 
-    if len(daily) >= 2:
-        rolling = daily.rolling(min(30, max(2, len(daily) // 2)), min_periods=1).mean()
+    # Feature Importance (최고 모델이 트리 기반인 경우)
+    best_model_obj = sk_models[best_sk["Model"]]
+    if hasattr(best_model_obj, "feature_importances_"):
+        st.markdown(f"**{best_sk['Model']} 피처 중요도**")
+        imp = pd.DataFrame({
+            "변수": feat_cols,
+            "중요도": best_model_obj.feature_importances_
+        }).sort_values("중요도", ascending=True)
+        fig = px.bar(imp, x="중요도", y="변수", orientation="h",
+                     color="중요도", color_continuous_scale="Reds")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ────────────────────────────────────────────────────────
+# TAB 3: 딥러닝
+# ────────────────────────────────────────────────────────
+with tab_dl:
+    st.subheader("🧠 딥러닝 모델 학습 & 비교")
+
+    if not use_dl:
+        st.warning("사이드바에서 '딥러닝 학습'을 체크해주세요.")
+        st.stop()
+
+    n_feat = X_tr_scaled.shape[1]
+    es = EarlyStopping(patience=5, restore_best_weights=True, verbose=0)
+
+    # CNN / LSTM / GRU 용 3D 변환
+    X_tr_3d = X_tr_scaled.reshape(X_tr_scaled.shape[0], X_tr_scaled.shape[1], 1)
+    X_te_3d = X_te_scaled.reshape(X_te_scaled.shape[0], X_te_scaled.shape[1], 1)
+
+    # LSTM/GRU 용 (timestep=1, features=n_feat)
+    X_tr_seq = X_tr_scaled.reshape(X_tr_scaled.shape[0], 1, X_tr_scaled.shape[1])
+    X_te_seq = X_te_scaled.reshape(X_te_scaled.shape[0], 1, X_te_scaled.shape[1])
+
+    dl_models_def = {
+        "DNN": lambda: Sequential([
+            Dense(64, activation="relu", input_shape=(n_feat,)),
+            Dropout(0.2),
+            Dense(32, activation="relu"),
+            Dense(1)
+        ]),
+        "Wide & Deep": None,   # 별도 빌드
+        "1D-CNN": None,
+        "LSTM": None,
+        "GRU": None,
+    }
+
+    def build_wide_deep(n):
+        wi = Input(shape=(n,))
+        di = Input(shape=(n,))
+        d  = Dense(128, activation="relu")(di)
+        d  = Dense(64,  activation="relu")(d)
+        m  = concatenate([wi, d])
+        o  = Dense(1)(m)
+        mdl = Model([wi, di], o)
+        mdl.compile(optimizer="adam", loss="mse", metrics=["mae"])
+        return mdl
+
+    def build_cnn(n):
+        mdl = Sequential([
+            Conv1D(64, 2, activation="relu", input_shape=(n, 1)),
+            MaxPooling1D(),
+            Flatten(),
+            Dense(64, activation="relu"),
+            Dense(1)
+        ])
+        mdl.compile(optimizer="adam", loss="mse", metrics=["mae"])
+        return mdl
+
+    def build_lstm(n):
+        mdl = Sequential([
+            LSTM(64, input_shape=(1, n)),
+            Dense(32, activation="relu"),
+            Dense(1)
+        ])
+        mdl.compile(optimizer="adam", loss="mse", metrics=["mae"])
+        return mdl
+
+    def build_gru(n):
+        mdl = Sequential([
+            GRU(64, input_shape=(1, n)),
+            Dense(32, activation="relu"),
+            Dense(1)
+        ])
+        mdl.compile(optimizer="adam", loss="mse", metrics=["mae"])
+        return mdl
+
+    dl_results = []
+    histories  = {}
+
+    dl_tasks = ["DNN", "Wide & Deep", "1D-CNN", "LSTM", "GRU"]
+    prog_dl = st.progress(0, "딥러닝 모델 학습 중...")
+
+    for i, name in enumerate(dl_tasks):
+        prog_dl.progress(i/len(dl_tasks), f"{name} 학습 중...")
+
+        if name == "DNN":
+            mdl = dl_models_def["DNN"]()
+            mdl.compile(optimizer="adam", loss="mse", metrics=["mae"])
+            h = mdl.fit(X_tr_scaled, y_tr,
+                        validation_split=0.2, epochs=epochs_dl,
+                        batch_size=batch_size, callbacks=[es], verbose=0)
+            pred = mdl.predict(X_te_scaled, verbose=0).flatten()
+
+        elif name == "Wide & Deep":
+            mdl = build_wide_deep(n_feat)
+            h = mdl.fit([X_tr_scaled, X_tr_scaled], y_tr,
+                        validation_split=0.2, epochs=epochs_dl,
+                        batch_size=batch_size, callbacks=[es], verbose=0)
+            pred = mdl.predict([X_te_scaled, X_te_scaled], verbose=0).flatten()
+
+        elif name == "1D-CNN":
+            mdl = build_cnn(n_feat)
+            h = mdl.fit(X_tr_3d, y_tr,
+                        validation_split=0.2, epochs=epochs_dl,
+                        batch_size=batch_size, callbacks=[es], verbose=0)
+            pred = mdl.predict(X_te_3d, verbose=0).flatten()
+
+        elif name == "LSTM":
+            mdl = build_lstm(n_feat)
+            h = mdl.fit(X_tr_seq, y_tr,
+                        validation_split=0.2, epochs=epochs_dl,
+                        batch_size=batch_size, callbacks=[es], verbose=0)
+            pred = mdl.predict(X_te_seq, verbose=0).flatten()
+
+        elif name == "GRU":
+            mdl = build_gru(n_feat)
+            h = mdl.fit(X_tr_seq, y_tr,
+                        validation_split=0.2, epochs=epochs_dl,
+                        batch_size=batch_size, callbacks=[es], verbose=0)
+            pred = mdl.predict(X_te_seq, verbose=0).flatten()
+
+        r = evaluate_model(y_te, pred, name)
+        dl_results.append(r)
+        all_results.append(r)
+        histories[name] = h.history
+
+    prog_dl.empty()
+
+    dl_df = pd.DataFrame(dl_results).sort_values("R²", ascending=False).reset_index(drop=True)
+    st.session_state["dl_df"] = dl_df
+
+    best_dl = dl_df.iloc[0]
+    st.success(f"🏆 최고 딥러닝 모델: **{best_dl['Model']}** (R² = {best_dl['R²']:.4f})")
+
+    st.dataframe(
+        dl_df.style.background_gradient(subset=["R²"], cmap="Reds")
+                   .format({"MAE": "{:.4f}", "RMSE": "{:.4f}", "R²": "{:.4f}"}),
+        use_container_width=True
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.bar(dl_df, x="Model", y="R²", color="R²",
+                     color_continuous_scale="Reds", title="딥러닝 R² 비교")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        fig = px.bar(dl_df, x="Model", y=["MAE", "RMSE"], barmode="group",
+                     title="딥러닝 MAE / RMSE 비교",
+                     color_discrete_sequence=["#EF4444", "#F97316"])
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 학습 곡선
+    st.markdown("**모델별 학습 손실 곡선**")
+    cols_loss = st.columns(len(dl_tasks))
+    for idx, name in enumerate(dl_tasks):
+        h = histories[name]
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=daily.index, y=daily.values, mode="lines",
-                                  name="일별 평균", line=dict(color="lightgray")))
-        fig.add_trace(go.Scatter(x=rolling.index, y=rolling.values, mode="lines",
-                                  name="이동평균", line=dict(color="#e74c3c", width=3)))
-        fig.update_layout(xaxis_title="계약일", yaxis_title="면적당금액(만원/㎡)")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("일별 추이를 그리기에 데이터 포인트가 부족합니다.")
+        fig.add_trace(go.Scatter(y=h["loss"], name="Train", line=dict(color="#EF4444")))
+        fig.add_trace(go.Scatter(y=h["val_loss"], name="Val", line=dict(color="#3B82F6")))
+        fig.update_layout(title=name, height=220,
+                          margin=dict(t=40, b=10, l=10, r=10),
+                          legend=dict(font=dict(size=9)))
+        cols_loss[idx].plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### 월별 평균 거래금액")
-    monthly = (
-        df.set_index("계약일").resample("M")["물건금액(만원)"].mean().dropna()
+# ────────────────────────────────────────────────────────
+# TAB 4: 전체 비교
+# ────────────────────────────────────────────────────────
+with tab_cmp:
+    st.subheader("📈 ML vs DL 통합 비교")
+
+    if "sk_df" not in st.session_state or "dl_df" not in st.session_state:
+        st.info("머신러닝과 딥러닝 탭을 먼저 실행해주세요.")
+        st.stop()
+
+    sk_df_ = st.session_state["sk_df"].copy()
+    dl_df_ = st.session_state["dl_df"].copy()
+    sk_df_["유형"] = "머신러닝"
+    dl_df_["유형"] = "딥러닝"
+    all_df = pd.concat([sk_df_, dl_df_], ignore_index=True).sort_values("R²", ascending=False)
+
+    overall_best = all_df.iloc[0]
+    st.success(f"🥇 전체 최고 모델: **{overall_best['Model']}** "
+               f"({overall_best['유형']}) — R² = {overall_best['R²']:.4f}")
+
+    st.dataframe(
+        all_df.style.background_gradient(subset=["R²"], cmap="RdYlGn")
+                    .format({"MAE": "{:.4f}", "RMSE": "{:.4f}", "R²": "{:.4f}"}),
+        use_container_width=True
     )
-    if len(monthly) >= 1:
-        fig = px.line(
-            x=monthly.index, y=monthly.values, markers=True,
-            labels={"x": "월", "y": "평균 거래금액(만원)"},
+
+    # 통합 바 차트
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.bar(all_df.sort_values("R²"), x="R²", y="Model",
+                     color="유형", orientation="h",
+                     color_discrete_map={"머신러닝": "#EF4444", "딥러닝": "#3B82F6"},
+                     title="전체 모델 R² 비교")
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        # 레이더 차트
+        r2_vals = all_df["R²"].clip(lower=0).tolist()
+        labels  = all_df["Model"].tolist()
+        r2_vals += [r2_vals[0]]
+        angles = np.linspace(0, 2*np.pi, len(labels), endpoint=False).tolist()
+        angles += [angles[0]]
+
+        fig = go.Figure(go.Scatterpolar(
+            r=r2_vals, theta=labels + [labels[0]],
+            fill="toself", line_color="#EF4444", fillcolor="rgba(239,68,68,0.2)"
+        ))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            title="R² 레이더 차트", height=420
         )
-        fig.update_traces(line_color="#e74c3c")
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("월별 데이터가 충분하지 않습니다.")
 
-    st.markdown("#### 건축년도별 평균 면적당금액")
-    by_year_built = (
-        df.groupby("건축년도")["면적당금액"].mean().reset_index().sort_values("건축년도")
-    )
-    fig = px.bar(by_year_built, x="건축년도", y="면적당금액",
-                 color_discrete_sequence=["#e74c3c"])
+    # 히트맵
+    st.markdown("**모델 성능 히트맵**")
+    hm = all_df.set_index("Model")[["MAE", "RMSE", "R²"]]
+    fig = px.imshow(hm.T, text_auto=".4f", color_continuous_scale="RdBu_r",
+                    aspect="auto")
+    fig.update_layout(height=250)
     st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------------------------------------------------
-# Tab 4. 모델 비교 & 가격 예측
-# -----------------------------------------------------------------------
-with tab4:
-    st.markdown("### 회귀 모델 성능 비교")
-    st.caption("전체(필터 적용 전) 전처리 데이터를 기준으로 모델을 학습합니다.")
+# ────────────────────────────────────────────────────────
+# TAB 5: 시계열 (Prophet)
+# ────────────────────────────────────────────────────────
+with tab_ts:
+    st.subheader("📅 시계열 분석 (Prophet)")
 
-    if len(df_all) < 50:
-        st.warning("모델 학습을 위한 데이터가 너무 적습니다 (최소 50건 이상 권장).")
-    else:
-        bundle = train_models(df_all)
-        result_df = bundle["result_df"]
-        best_name = bundle["best_name"]
+    if not use_ts:
+        st.info("사이드바에서 '시계열 분석 (Prophet)'을 체크하고 다시 실행해주세요.")
+        st.stop()
 
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            fig = px.bar(
-                result_df, x="Model", y="R2", color_discrete_sequence=["#e74c3c"],
-                text=result_df["R2"].round(3),
-            )
-            fig.update_layout(yaxis_title="R² Score", xaxis_title="")
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            st.markdown("**모델별 성능 지표**")
+    try:
+        from prophet import Prophet
+
+        ts = (df.groupby("계약일")["물건금액(만원)"]
+                .mean().reset_index())
+        ts.columns = ["ds", "y"]
+
+        with st.spinner("Prophet 모델 학습 중..."):
+            m = Prophet(yearly_seasonality=True, weekly_seasonality=False,
+                        daily_seasonality=False)
+            m.fit(ts)
+
+        periods = st.slider("예측 기간 (일)", 30, 365, 180, 30)
+        future   = m.make_future_dataframe(periods=periods)
+        forecast = m.predict(future)
+
+        # 예측 시각화
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=ts["ds"], y=ts["y"],
+                                 name="실제", mode="markers",
+                                 marker=dict(color="#EF4444", size=4)))
+        fig.add_trace(go.Scatter(x=forecast["ds"], y=forecast["yhat"],
+                                 name="예측", line=dict(color="#3B82F6")))
+        fig.add_trace(go.Scatter(
+            x=pd.concat([forecast["ds"], forecast["ds"][::-1]]),
+            y=pd.concat([forecast["yhat_upper"], forecast["yhat_lower"][::-1]]),
+            fill="toself", fillcolor="rgba(59,130,246,0.15)",
+            line=dict(color="rgba(255,255,255,0)"), name="신뢰구간"
+        ))
+        fig.update_layout(title="물건금액(만원) 시계열 예측", height=450,
+                          xaxis_title="날짜", yaxis_title="평균 물건금액(만원)")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 성분 분해
+        st.markdown("**트렌드 & 계절성 분해**")
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_t = px.line(forecast, x="ds", y="trend",
+                            title="트렌드", color_discrete_sequence=["#EF4444"])
+            st.plotly_chart(fig_t, use_container_width=True)
+        with col2:
+            fig_y = px.line(forecast, x="ds", y="yearly",
+                            title="연간 계절성", color_discrete_sequence=["#F97316"])
+            st.plotly_chart(fig_y, use_container_width=True)
+
+        with st.expander("예측 결과 데이터"):
             st.dataframe(
-                result_df.style.format({"MAE": "{:.1f}", "RMSE": "{:.1f}", "R2": "{:.3f}"}),
-                use_container_width=True,
+                forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(50),
+                use_container_width=True
             )
-            st.success(f"최적 모델: **{best_name}** (R² = {result_df.iloc[0]['R2']:.3f})")
 
-        st.markdown("---")
-        st.markdown("### 💰 거래금액 예측")
-        st.caption(f"선택한 조건으로 '{best_name}' 모델을 사용해 면적당금액 및 예상 거래금액을 추정합니다.")
-
-        encoders = bundle["encoders"]
-        feature_cols = bundle["feature_cols"]
-        best_model = bundle["models"][best_name]
-
-        with st.form("predict_form"):
-            f1, f2, f3 = st.columns(3)
-            with f1:
-                in_gu = st.selectbox("자치구명", sorted(encoders["자치구명"].classes_))
-                in_dong = st.selectbox("법정동명", sorted(encoders["법정동명"].classes_))
-                in_usage = st.selectbox("건물용도", sorted(encoders["건물용도"].classes_))
-            with f2:
-                in_building = st.selectbox("건물명", sorted(encoders["건물명"].classes_))
-                in_report = st.selectbox("신고구분", sorted(encoders["신고구분"].classes_))
-                in_floor = st.number_input("층", value=1, step=1)
-            with f3:
-                in_area = st.number_input("건물면적(㎡)", min_value=1.0, value=60.0, step=1.0)
-                in_land = st.number_input("토지면적(㎡)", min_value=0.0, value=30.0, step=1.0)
-                year_built_min = int(df_all["건축년도"].min())
-                year_built_max = max(int(df_all["건축년도"].max()), 2026)
-                default_year_built = int(df_all["건축년도"].median())
-                in_year_built = st.number_input(
-                    "건축년도",
-                    min_value=year_built_min,
-                    max_value=year_built_max,
-                    value=min(max(default_year_built, year_built_min), year_built_max),
-                    step=1,
-                )
-
-            submitted = st.form_submit_button("예측하기")
-
-        if submitted:
-            row = pd.DataFrame([{
-                "자치구명": encoders["자치구명"].transform([in_gu])[0],
-                "법정동명": encoders["법정동명"].transform([in_dong])[0],
-                "건물면적(㎡)": in_area,
-                "토지면적(㎡)": in_land,
-                "층": in_floor,
-                "건축년도": in_year_built,
-                "건물용도": encoders["건물용도"].transform([in_usage])[0],
-                "건물명": encoders["건물명"].transform([in_building])[0],
-                "신고구분": encoders["신고구분"].transform([in_report])[0],
-            }])[feature_cols]
-
-            pred_unit_price = best_model.predict(row)[0]
-            pred_total_price = pred_unit_price * in_area
-
-            r1, r2 = st.columns(2)
-            r1.metric("예상 면적당금액", f"{pred_unit_price:,.1f} 만원/㎡")
-            r2.metric("예상 거래금액", f"{pred_total_price:,.0f} 만원")
+    except ImportError:
+        st.error("Prophet이 설치되어 있지 않습니다. `pip install prophet`을 실행해주세요.")
+    except Exception as e:
+        st.error(f"Prophet 오류: {e}")
